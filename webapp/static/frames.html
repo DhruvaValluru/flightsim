@@ -55,6 +55,10 @@
   table.m td.v { text-align: right; font-family: ui-monospace, monospace; padding: 0 .5rem; }
   .matrix { display: inline-block; vertical-align: top; }
   button.copy { font-size: .8em; margin-left: .4rem; }
+  .b3 .tabs { display: flex; gap: .3rem; margin: 0 0 .3rem; }
+  .b3 .tabs button { font: inherit; font-size: .8rem; padding: .2rem .7rem; border-radius: 4px;
+    border: 1px solid #3c6e4c; background: #0b1a10; color: #9fd6ad; cursor: pointer; }
+  .b3 .tabs button.on { background: #2f6b43; color: #eafff0; border-color: #6fd18f; }
 </style>
 
 <header>
@@ -117,6 +121,38 @@ function matrixTable(name, matrix) {
 // One click copies the exact recorded value (a matrix, a record); a
 // consumer should never retype a number off a screen.
 document.addEventListener("click", event => {
+  // The 3-D zip of a clip takes a while to draw: start it in the
+  // background, show its progress, then download it.
+  const zip = event.target.closest && event.target.closest("a.box3dzip");
+  if (zip) {
+    event.preventDefault();
+    let note = zip.nextElementSibling;
+    while (note && !(note.classList && note.classList.contains("box3dstate"))) {
+      note = note.nextElementSibling;
+    }
+    note = note || zip.parentElement.querySelector(".box3dstate");
+    const poll = async () => {
+      let st;
+      try { st = await (await fetch(zip.dataset.build)).json(); }
+      catch (error) { note.textContent = "could not reach the server"; return; }
+      if (st.state === "ready") { note.textContent = "ready"; location.href = zip.href; return; }
+      if (st.state === "failed") { note.textContent = "failed: " + (st.error || "?"); return; }
+      note.textContent = st.total ? `drawing pictures ${st.done}/${st.total}\u2026`
+                                  : "preparing\u2026";
+      setTimeout(poll, 1500);
+    };
+    poll();
+    return;
+  }
+  const tab = event.target.closest && event.target.closest(".b3 .tabs button");
+  if (tab) {
+    const box = tab.closest(".b3");
+    const url = `${box.dataset.base}/${tab.dataset.k}.png`;
+    box.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("on", b === tab));
+    box.querySelector("img").src = url;
+    box.querySelector("a").href = url;
+    return;
+  }
   const button = event.target.closest("button.copy");
   if (!button) return;
   const text = button.dataset.json;
@@ -475,8 +511,16 @@ async function load() {
   document.getElementById("links").innerHTML =
     `<a href="${base}/cameras/${encodeURIComponent(cameraId)}/frames.zip">` +
     `<b>download every frame with its labels (zip)</b></a> &middot; ` +
-    `<a href="${base}/cameras/${encodeURIComponent(cameraId)}/box3d.zip">` +
-    `<b>download the 3-D boxes (3D zip)</b></a> ` +
+    `<a class="box3dzip" href="${base}/cameras/${encodeURIComponent(cameraId)}/box3d.zip" ` +
+    `data-build="${base}/cameras/${encodeURIComponent(cameraId)}/box3d_build">` +
+    `<b>download the 3-D pictures (3D zip: plain, detailed, scene)</b></a> ` +
+    `<span class="dim box3dstate"></span> &middot; ` +
+    `<a href="/viewer.html?run=${encodeURIComponent(runId)}&camera=${encodeURIComponent(cameraId)}" ` +
+    `target="_blank"><b>open the interactive 3-D viewer</b></a> &middot; overlay video: ` +
+    ["detailed", "scene", "plain"].map(k =>
+      `<a class="box3dzip" href="${base}/cameras/${encodeURIComponent(cameraId)}/box3d_${k}.mp4" ` +
+      `data-build="${base}/cameras/${encodeURIComponent(cameraId)}/box3d_video_build?kind=${k}">${k}</a>`)
+      .join(" ") + ` <span class="dim box3dstate"></span> ` +
     `&middot; dataset: <a href="${base}/dataset.zip?format=coco">COCO</a> ` +
     `<a href="${base}/dataset.zip?format=kitti">KITTI</a> ` +
     `<a href="${base}/dataset.zip?format=webdataset">WebDataset</a> ` +
@@ -511,9 +555,6 @@ async function load() {
                                  ["boxed:" + name.replace(/\.png$/, "_boxes.png"),
                                   "with 2-D boxes — solid green from the mask " +
                                   "pixels, dashed amber predicted"],
-                                 ["boxed3d:" + name.replace(/\.png$/, "_box3d.png"),
-                                  "with 3-D boxes — rebuilt from the record alone; " +
-                                  "arrow = where the nose points"],
                                  ...derived.map(([suffix, text]) =>
                                    ["frames:" + name.replace(/\.png$/, suffix), text]),
                                  ["previews:preview_" +
@@ -545,6 +586,19 @@ async function load() {
                    `<div class="dim">${esc(label)} &middot; ` +
                    `<a href="${href}" download>${esc(name)}</a></div>`);
       }
+    }
+    // The three 3-D pictures (plain box, detailed readout, scene), drawn
+    // by the server the first time each is looked at.
+    {
+      const p3 = `${base}/cameras/${encodeURIComponent(cameraId)}/box3d/${record.index}`;
+      shots.push(`<div class="b3" data-base="${p3}"><div class="tabs">` +
+        [["plain", "Plain"], ["detailed", "Detailed"], ["scene", "Scene"]].map(([k, t], i) =>
+          `<button type="button" data-k="${k}"${i ? "" : ' class="on"'}>${t}</button>`).join("") +
+        `</div><a href="${p3}/plain.png" target="_blank"><img src="${p3}/plain.png" ` +
+        `loading="lazy" decoding="async" alt="3-D picture"></a>` +
+        `<div class="dim">3-D pictures: plain box &middot; detailed (forces, airflow, ` +
+        `flight panels) &middot; scene (heights, grid, rings, path, environment) &mdash; ` +
+        `drawn the first time you open each</div></div>`);
     }
     // The frame's own labels, as a file: the same record this page
     // renders, plus the run context, written beside the PNG.

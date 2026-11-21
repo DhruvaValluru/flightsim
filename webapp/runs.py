@@ -860,7 +860,7 @@ def provision_flight(spec: ScenarioSpec, *, per_case: bool = False) -> Dict[str,
     its seed as a user edit, which build_case would keep on every case.
     """
     provisioned = provision_place(spec)
-    out = {**provisioned, "weather_refusal": None, "violations": []}
+    out = {**provisioned, "weather_refusal": None, "violations": [], "prompt_turn": None}
     if provisioned["refusal"] is not None:
         return out
     # Severe-weather composition edits (thunderstorm -> severe turbulence
@@ -883,6 +883,17 @@ def provision_flight(spec: ScenarioSpec, *, per_case: bool = False) -> Dict[str,
     # this spec object into the render flow.
     from webapp.route_map import plan_route_flight
 
+    # A turn the prompt asks for ("steep left banking turn", "circle"),
+    # with no route drawn, is planned here as a route the autopilot flies
+    # (webapp/prompt_turn.py) -- before the route pre-flight, which then
+    # flies it like a drawn one. No closing arc: the run flies straight
+    # and says why.
+    try:
+        from webapp.prompt_turn import plan_prompt_turn
+
+        out["prompt_turn"] = plan_prompt_turn(spec, duration_cap_s=CLIP_SECONDS)
+    except Exception as exc:          # noqa: BLE001 -- never block a run on the turn plan
+        out["prompt_turn"] = {"refused": "route.turn_plan", "message": f"{type(exc).__name__}: {exc}"}
     route_refusal = plan_route_flight(spec)
     # The seed derives BEFORE the digest is answered. A run can be
     # stochastic even with turbulence word "none" -- lee-rotor over windy
@@ -2918,6 +2929,15 @@ def relight_sky_plan(spec: ScenarioSpec, sky: Path, event_note) -> Optional[Dict
     values = lighting.effective_values(
         lighting.stated_values(block) if block is not None else {})
     elevation, azimuth = values["sun_elevation_deg"], values["sun_azimuth_deg"]
+    stated = lighting.stated_values(block) if block is not None else {}
+    if (azimuth is None and elevation is not None and stated.get("sun_elevation_deg") is None
+            and values["preset"] in lighting.PRESET_SUN_AZIMUTH_DEG
+            and abs(float(plan["sun"]["elevation_deg"]) - float(elevation)) > 10.0):
+        # A preset that moves the sun far from the plan's (e.g. golden_hour
+        # over a noon plan) moves its bearing with it: the plan's own bearing
+        # (due south at noon) is impossible at 7 deg up. A plan already near
+        # the preset's height (a stated golden hour) keeps its real bearing.
+        azimuth = lighting.PRESET_SUN_AZIMUTH_DEG[values["preset"]]
     if elevation is not None or azimuth is not None:
         plan = relight(plan, elevation_deg=elevation, azimuth_deg=azimuth,
                        basis=f"the lighting block ('{values['preset']}', webapp.runs."

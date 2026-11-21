@@ -39,6 +39,7 @@ should not have their run reshaped.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
@@ -134,6 +135,31 @@ from core.capture.window import clip_columns  # noqa: E402,F401 -- the one copy,
 from core.render.flags import DEFAULT_FPS as RENDER_FPS  # noqa: E402 -- camera-motion-layer: the frame clock
 
 
+def flight_spec_for(spec):
+    """(spec to fly headlessly, validate_first, assert_closure).
+
+    A drawn route on a spec projected for the UE host: the projection
+    switched the autopilot off (HOST_OPEN_LOOP_FROM -- the host has none
+    and steers from the route pre-flight's control schedule), and the
+    validator's route.hold_state, answered for this run by /run, would
+    refuse the headless pre-run; with validation off the runner would still
+    refuse a route with no autopilot. So the pre-run flies the copy the
+    route pre-flight flies (webapp.route_map._route_copy: autopilot back
+    on), unvalidated and without the closure assertion, exactly as that
+    pre-flight does (its closure is the route's own check, already passed
+    at /run). Any other spec flies as it stands, fully checked."""
+    from webapp.runs import HOST_OPEN_LOOP_FROM
+
+    route = getattr(spec, "route", None)
+    if (route is not None and not route.is_default()
+            and not bool(spec.hold_state.value)
+            and str(spec.hold_state.frm) == HOST_OPEN_LOOP_FROM):
+        from webapp.route_map import _route_copy
+
+        return _route_copy(spec, restore_autopilot=True), False, False
+    return spec, True, True
+
+
 def solve(spec, scene: Dict, heightfield=None, terrain_ground=None,
           tornado: Optional[Dict] = None,
           duration_s: Optional[float] = None):
@@ -152,7 +178,9 @@ def solve(spec, scene: Dict, heightfield=None, terrain_ground=None,
     from core.scenario.runner import run_spec
 
     frame = SceneFrame.for_spec(spec, heightfield)
-    result = run_spec(spec, terrain_ground=terrain_ground)
+    flown, validate_first, assert_closure = flight_spec_for(spec)
+    result = run_spec(flown, validate_first=validate_first, assert_closure=assert_closure,
+                      terrain_ground=terrain_ground)
     columns = clip_columns(result.telemetry.columns, duration_s)
     datum = float(spec.terrain_elevation.value)
     tracks, schedules = _solve_cameras(
@@ -607,7 +635,148 @@ CAMERA_VIEW_KEYS = (
 )
 
 
-def box3d_archive(out: Path, camera_id: str) -> Optional[Path]:
+_NUMBER_LIST = re.compile(r"\[\s*(-?[\d.eE+-]+(?:\s*,\s*-?[\d.eE+-]+)*)\s*\]")
+
+
+def _compact_json(data) -> str:
+    """Indented JSON with every short list of numbers on one line (a
+    vector, a pixel, a matrix row), so a frame's file reads like the
+    picture: one point per line, not one number per line."""
+    text = json.dumps(data, indent=1, ensure_ascii=False)
+    return _NUMBER_LIST.sub(
+        lambda m: "[" + ", ".join(v.strip() for v in m.group(1).split(",")) + "]", text)
+
+
+#: A clip's 3-D pictures are drawn for at most this many frames by default
+#: (evenly spaced, first and last included); every frame keeps its JSON.
+BOX3D_MAX_PICTURES = 12
+
+
+def box3d_picture_indices(records: List[Dict], every: int = 0) -> List[int]:
+    """The frame indices that get the three 3-D pictures: every ``every``-th
+    frame, or (``every`` 0) evenly spaced up to BOX3D_MAX_PICTURES, always
+    with the first and last frame."""
+    idx = [int(r.get("index", i)) for i, r in enumerate(records)]
+    if not idx:
+        return []
+    if every <= 0:
+        every = max(1, -(-len(idx) // BOX3D_MAX_PICTURES))
+    chosen = idx[::every]
+    if idx[-1] not in chosen:
+        chosen.append(idx[-1])
+    return chosen
+
+
+BOX3D_VIDEO_KINDS = ("detailed", "scene", "plain")
+
+
+def box3d_video(out: Path, camera_id: str, kind: str = "detailed",
+                progress: Optional[Callable] = None) -> Optional[Path]:
+    """One view's clip as an overlay video: the ``kind`` picture (detailed,
+    scene or plain) drawn for EVERY frame, encoded at the clip's own frame
+    rate (frames / their time span) with the clips' BT.709 encode. Built
+    under ``downloads/<camera>_box3d_<kind>.mp4`` and reused while newer
+    than its pictures; None when the view has under two frames."""
+    import shutil
+    import tempfile
+
+    from core.capture.box_frames import (box3d_detailed_name, box3d_name, box3d_scene_name,
+                                         draw_box_frames)
+    from core.capture.display import clip_encode_args
+    from core.util.platform import find_ffmpeg
+
+    if kind not in BOX3D_VIDEO_KINDS:
+        raise ValueError(f"no such picture kind {kind!r}")
+    manifest_path = out / "capture_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    records = sorted((r for r in manifest.get("frames", [])
+                      if str(r.get("camera_id")) == camera_id),
+                     key=lambda r: float(r.get("t_s") or 0.0))
+    if len(records) < 2:
+        return None
+    draw_box_frames(manifest, out, cameras=[camera_id], kinds=(kind,), progress=progress)
+    namer = {"plain": box3d_name, "detailed": box3d_detailed_name,
+             "scene": box3d_scene_name}[kind]
+    pictures = [out / "boxed3d" / camera_id / namer(Path(str(r.get("file", ""))).name)
+                for r in records]
+    pictures = [p for p in pictures if p.is_file()]
+    if len(pictures) < 2:
+        return None
+    video = out / "downloads" / f"{camera_id}_box3d_{kind}.mp4"
+    if video.is_file() and video.stat().st_mtime >= max(p.stat().st_mtime for p in pictures):
+        return video
+    span = float(records[-1].get("t_s") or 0.0) - float(records[0].get("t_s") or 0.0)
+    fps = (len(records) - 1) / span if span > 0 else 10.0
+    video.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        # Numbered copies (hard links where the disk allows) so ffmpeg reads
+        # one contiguous sequence whatever the frames' own numbering.
+        for i, p in enumerate(pictures):
+            dst = Path(tmp) / f"f_{i:05d}.png"
+            try:
+                dst.hardlink_to(p)
+            except (OSError, AttributeError, NotImplementedError):
+                shutil.copyfile(p, dst)
+        partial = video.with_suffix(".part.mp4")
+        command = [str(find_ffmpeg()), "-y", "-loglevel", "error", "-framerate", f"{fps:.6f}",
+                   "-i", str(Path(tmp) / "f_%05d.png"),
+                   *clip_encode_args(18, filter_chain="pad=ceil(iw/2)*2:ceil(ih/2)*2"),
+                   str(partial)]
+        done = subprocess.run(command, capture_output=True, text=True)
+        if done.returncode != 0 or not partial.is_file():
+            raise RuntimeError(f"ffmpeg failed: {done.stderr.strip()[-400:]}")
+        partial.replace(video)
+    return video
+
+
+def box3d_frame_json(out: Path, manifest: Dict, record: Dict, full: bool = True) -> Dict:
+    """One frame's 3-D JSON (the zip's frame_NNNN_box3d.json and the
+    viewer's data): box, physics, panels, overlay; with ``full`` also the
+    airflow lines, the scene numbers and the surface pressure."""
+    from core.capture.box3d import box3d_section
+    from core.capture.box_frames import box3d_detailed_name, box3d_name, box3d_scene_name
+
+    camera_id = str(record.get("camera_id"))
+    name = Path(str(record.get("file", ""))).name
+    names = {"plain": box3d_name(name), "detailed": box3d_detailed_name(name),
+             "scene": box3d_scene_name(name)}
+    box_3d = box3d_section(manifest, record)
+    try:
+        from core.capture.flight_overlay import frame_sidecar
+
+        sidecar = frame_sidecar(manifest, record, box_3d, airflow=full,
+                                pictures={} if not full else {
+            "plain": f"{names['plain']}: the frame with each aircraft's 3-D box",
+            "detailed": (f"{names['detailed']}: the box plus airflow, forces "
+                         "(lift, weight, thrust, drag, net), velocity, surface pressure "
+                         "and the flight-state / forces panels"),
+            "scene": (f"{names['scene']}: the world round the aircraft -- height "
+                      "contours and tint, ground grid, range rings, drop line, "
+                      "flight path, horizon, landmarks, weather, environment panel")})
+    except Exception:                # noqa: BLE001 -- the box alone still ships
+        return {"camera_id": camera_id, "frame_index": record.get("index"),
+                "t_s": record.get("t_s"), "box_3d": box_3d}
+    if not full:
+        return sidecar
+    frame_path = out / str(record.get("file", ""))
+    if not frame_path.is_file():
+        frame_path = (out / "previews" / camera_id
+                      / f"preview_{int(record.get('index', 0)):04d}.png")
+    try:
+        from core.capture.flight_overlay import overlay_geometry, surface_pressure_for
+        from core.capture.scene_overlay import scene_geometry, scene_json
+
+        sidecar["scene_overlay"] = scene_json(scene_geometry(manifest, record, frame_path))
+        _, cp_stats = surface_pressure_for(record, frame_path, overlay_geometry(manifest, record))
+        if cp_stats:
+            sidecar["surface_pressure"] = cp_stats
+    except Exception as exc:         # noqa: BLE001 -- the rest still ships
+        sidecar["scene_overlay"] = {"error": f"{type(exc).__name__}: {exc}"}
+    return sidecar
+
+
+def box3d_archive(out: Path, camera_id: str, every: int = 0,
+                  progress: Optional[Callable] = None) -> Optional[Path]:
     """A zip of ONE view's 3-D boxes: per frame the 3-D box picture and a
     small JSON with just that frame's ``box_3d`` section (each plane's box
     in camera coordinates, which way it faces, the rebuild recipe and its
@@ -617,7 +786,8 @@ def box3d_archive(out: Path, camera_id: str) -> Optional[Path]:
     import zipfile
 
     from core.capture.box3d import box3d_section
-    from core.capture.box_frames import box3d_name, draw_box_frames
+    from core.capture.box_frames import (box3d_detailed_name, box3d_name, box3d_scene_name,
+                                         draw_box_frames)
 
     manifest_path = out / "capture_manifest.json"
     if not manifest_path.is_file():
@@ -630,12 +800,16 @@ def box3d_archive(out: Path, camera_id: str) -> Optional[Path]:
                if str(r.get("camera_id")) == camera_id]
     if not records:
         return None
+    pictured = set(box3d_picture_indices(records, every))
     try:
-        draw_box_frames(manifest, out, cameras=[camera_id])
+        draw_box_frames(manifest, out, cameras=[camera_id],
+                        kinds=("plain", "detailed", "scene"), indices=pictured,
+                        progress=progress)
     except (OSError, ImportError):
         pass
-    pictures = sorted((out / "boxed3d" / camera_id).glob("*_box3d.png"))
-    archive = out / "downloads" / f"{camera_id}_box3d.zip"
+    pictures = sorted((out / "boxed3d" / camera_id).glob("*_box3d*.png"))
+    suffix = "" if not every else f"_every{every}"
+    archive = out / "downloads" / f"{camera_id}_box3d{suffix}.zip"
     inputs = pictures + [manifest_path]
     if archive.is_file() and archive.stat().st_mtime >= max(
             p.stat().st_mtime for p in inputs):
@@ -644,16 +818,75 @@ def box3d_archive(out: Path, camera_id: str) -> Optional[Path]:
     readme = (
         f"{camera_id}: the 3-D boxes of run {out.name}\n"
         f"\n"
-        f"frame_NNNN_box3d.png  the frame with each plane's 3-D box drawn\n"
-        f"                 (blue; red = nose face; yellow arrow = where the\n"
-        f"                 nose points), rebuilt from the JSON beside it\n"
-        f"frame_NNNN_box3d.json  that frame's box_3d: per plane centre_m,\n"
-        f"                 extents_m (length/width/height), body_axes_in_camera\n"
-        f"                 (forward/right/down), orientation (yaw/pitch/roll\n"
-        f"                 from the camera and a word), shape_box (measured\n"
-        f"                 from the mesh, when the machine had it), the recipe\n"
-        f"                 to rebuild the 8 corners from these numbers and the\n"
-        f"                 frame's intrinsic_matrix alone, and rebuild_check\n"
+        f"frame_NNNN_box3d.png           the frame with each plane's 3-D box\n"
+        f"  (green edges and corner brackets, brighter nose face) and a tag:\n"
+        f"  id, length x span x height, range. Nothing else.\n"
+        f"\n"
+        f"frame_NNNN_box3d_detailed.png  the same box plus, for the flown\n"
+        f"  aircraft (the plane stays visible under all of it):\n"
+        f"  - the forces from the CG, to scale, in kN: LIFT, WEIGHT, THRUST,\n"
+        f"    DRAG, and NET when it is not ~0; the velocity off the nose\n"
+        f"  - the airflow round the airframe: lines that bend round the nose,\n"
+        f"    over and under the wing and off the tips, shaded by local\n"
+        f"    airspeed (dark = slower, pale = faster); hidden behind the plane\n"
+        f"  - FLIGHT STATE panel (position, altitude, speeds, Mach, attitude,\n"
+        f"    alpha / beta / gamma, load factor, air data, wind) and FORCES &\n"
+        f"    AERODYNAMICS panel (force bars, L/D, T/W, CL / CD, Ps, mass)\n"
+        f"\n"
+        f"frame_NNNN_box3d_scene.png     the world round the aircraft, measured:\n"
+        f"  height contours and a green tint on tall ground / buildings (from\n"
+        f"  the depth image), a 500 m ground grid, range rings round the point\n"
+        f"  below the plane and the drop line to it (AGL), the flight path\n"
+        f"  ahead (ticks every 5 s), the horizon, a pitch ladder, a heading\n"
+        f"  tape, and an ENVIRONMENT panel (location, ground, terrain in view,\n"
+        f"  tallest point, visible range, wind, turbulence, surface, sun, geoid)\n"
+        f"\n"
+        f"frame_NNNN_box3d.json  the same frame in numbers:\n"
+        f"  box_3d          per plane centre_m, extents_m, body axes,\n"
+        f"                  orientation, shape_box, rebuild recipe + check\n"
+        f"  flight_physics  every force (lift, drag, side force, thrust per\n"
+        f"                  engine, weight, aerodynamic total, net) as body /\n"
+        f"                  NED / camera vectors and magnitudes; force\n"
+        f"                  balance (acceleration, load factor from the forces\n"
+        f"                  vs the flight model's); velocity (ground, air,\n"
+        f"                  TAS / CAS / Mach, track, vertical speed); alpha,\n"
+        f"                  beta, flight path angle; attitude; air (density,\n"
+        f"                  pressure, temperature, speed of sound, dynamic\n"
+        f"                  pressure, wind, gusts); CL / CD / CY over the\n"
+        f"                  wing area; lifting-line circulation and downwash;\n"
+        f"                  energy and specific excess power; controls\n"
+        f"  pictures        which png is which\n"
+        f"  panels          the detailed picture's panels exactly as printed\n"
+        f"  overlay         plain / detailed: everything each picture draws:\n"
+        f"                  box corners (m and px), each\n"
+        f"                  arrow's ends (m and px) and scale, the airflow\n"
+        f"                  model, its parameters and every streamline's\n"
+        f"                  points (m and px) with the local speed ratio\n"
+        f"  scene_overlay   everything the scene picture draws: terrain stats,\n"
+        f"                  contour / grid / ring sample points (px), drop\n"
+        f"                  line, flight path points (m and px), horizon,\n"
+        f"                  pitch ladder, heading tape, environment values\n"
+        f"  camera, scene   the camera's pose and intrinsics; the scene\n"
+        f"\n"
+        f"physics.csv  one row per frame (time order): altitude, speeds, Mach,\n"
+        f"  attitude, alpha / beta / gamma, load factor, lift / drag / thrust /\n"
+        f"  weight / net (kN), L/D, CL, CD, dynamic pressure, density, wind,\n"
+        f"  specific excess power, energy height; a units row under the header.\n"
+        f"  On a clip the detailed picture also graphs lift, load, TAS and\n"
+        f"  altitude over the clip with the frame marked (OVER THE CLIP).\n"
+        f"\n"
+        f"A clip: the three pictures are drawn for up to {BOX3D_MAX_PICTURES} evenly\n"
+        f"spaced frames (first and last included); every frame has its JSON.\n"
+        f"Ask the server for ?every=1 (every frame) or ?every=N for more.\n"
+        f"\n"
+        f"How far to trust the numbers: docs/accuracy/FLIGHT_MODEL_CHECK.md in\n"
+        f"the repository. The Cessna 172P matches its handbook (stall within 4 %,\n"
+        f"top speed within ~6 %); the clean A-4 reaches 600 kt vs 585 kt\n"
+        f"published (+3 %); its default stores add drag (530 kt with them).\n"
+        f"\n"
+        f"Forces come from the JSBSim flight model's state at this frame.\n"
+        f"The airflow is a potential-flow + lifting-line model driven by\n"
+        f"this frame's lift and airspeed (fast and analytic, not CFD).\n"
         f"\n"
         f"Camera coordinates: x right, y down, z forward along the view,\n"
         f"metres. The full per-frame labels are in the frames zip.\n")
@@ -662,17 +895,32 @@ def box3d_archive(out: Path, camera_id: str) -> Optional[Path]:
         for record in records:
             name = Path(str(record.get("file"))).name
             stem = name[:-len(".png")] if name.endswith(".png") else name
-            picture = out / "boxed3d" / camera_id / box3d_name(name)
-            if picture.is_file():
-                zf.write(picture, arcname=f"{camera_id}_3d/{picture.name}",
-                         compress_type=zipfile.ZIP_STORED)
+            names = {"plain": box3d_name(name), "detailed": box3d_detailed_name(name),
+                     "scene": box3d_scene_name(name)}
+            has_pictures = int(record.get("index", -1)) in pictured
+            for picture_name in (names.values() if has_pictures else ()):
+                picture = out / "boxed3d" / camera_id / picture_name
+                if picture.is_file():
+                    zf.write(picture, arcname=f"{camera_id}_3d/{picture.name}",
+                             compress_type=zipfile.ZIP_STORED)
+            sidecar = box3d_frame_json(out, manifest, record, has_pictures)
+            if not has_pictures:
+                sidecar["pictures_note"] = (
+                    f"no pictures for this frame: a clip's pictures are drawn for "
+                    f"{len(pictured)} of its {len(records)} frames (download with "
+                    f"?every=1 for all); the physics and the box are here")
             zf.writestr(f"{camera_id}_3d/{stem}_box3d.json",
-                        json.dumps({"camera_id": camera_id,
-                                    "frame_index": record.get("index"),
-                                    "t_s": record.get("t_s"),
-                                    "box_3d": box3d_section(manifest, record)},
-                                   indent=1),
+                        _compact_json(sidecar),
                         compress_type=zipfile.ZIP_DEFLATED)
+        try:
+            from core.capture.flight_physics import clip_series, series_csv
+
+            rows = clip_series(manifest, camera_id)
+            if rows:
+                zf.writestr(f"{camera_id}_3d/physics.csv", series_csv(rows),
+                            compress_type=zipfile.ZIP_DEFLATED)
+        except Exception:            # noqa: BLE001 -- the pictures still ship
+            pass
         zf.writestr(f"{camera_id}_3d/README.txt", readme,
                     compress_type=zipfile.ZIP_DEFLATED)
     partial.replace(archive)
