@@ -135,7 +135,7 @@ def page() -> str:
   <div class="lede">Consolidation, component-level annotation, and a demonstration
   anyone can watch. The step-by-step plan and the guideline sheet, revision 2.</div>
   <div class="meta">
-    <div>For Shashank Aitharaju · Dhruva Valluru</div>
+    <div>For Shashank Mantrala · Dhruva Valluru</div>
     <div>Revision 2 · rebuilt {html.escape(date)} from <code>tasks/phase3_checklist.md</code>
     and <code>tasks/phase3_todo.md</code></div>
     <div>Built from: the Phase 3 requirements (13 Oct), the Windows review (24–25 Oct),

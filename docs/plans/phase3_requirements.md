@@ -5,7 +5,7 @@ can watch
 
 |               |                                                       |
 |---------------|-------------------------------------------------------|
-| **To / date** | Shashank Aitharaju · Dhruva Valluru · 13 October 2026 |
+| **To / date** | Shashank Mantrala · Dhruva Valluru · 13 October 2026 |
 | **Theme**     | Pull back — refine and consolidate rather than extend |
 
 Phase 3 is deliberately narrower than the two before it. The capability
